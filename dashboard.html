@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nixie Load Console (Live)</title>
+<style>
+  html { font-size: 16px; }
+
+  :root {
+    --ink: #17130e;
+    --ink-deep: #0d0b08;
+    --gunmetal: #2b241b;
+    --gunmetal-hi: #4a3f2d;
+    --gunmetal-lo: #1c170f;
+    --glow: #ff9a3c;
+    --glow-soft: #ffb35f;
+    --glow-dim: #402615;
+    --bone: #d9cfb8;
+    --bone-dim: #a89a7c;
+    --ok: #8fb87a;
+    --ok-glow: #c8e6b4;
+    --bad: #d9634a;
+    --bad-glow: #f0a58f;
+    --warn: #e8b34a;
+    --warn-glow: #f6d495;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 900px 500px at 50% 18%, rgba(255, 154, 60, 0.07), transparent 60%),
+      var(--ink);
+    color: var(--bone);
+    font-family: "Arial Narrow", "Helvetica Neue Condensed", "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2.5rem 1rem;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .console {
+    position: relative;
+    width: 100%;
+    max-width: 58rem;
+    background:
+      linear-gradient(155deg, var(--gunmetal-hi) 0%, var(--gunmetal) 12%, var(--gunmetal) 88%, var(--gunmetal-lo) 100%);
+    border-radius: 0.9rem;
+    padding: 2rem clamp(1.25rem, 4vw, 3rem) 1.75rem;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 -2px 0 rgba(0, 0, 0, 0.5) inset,
+      0 30px 60px -20px rgba(0, 0, 0, 0.75),
+      0 0 0 1px var(--ink-deep);
+  }
+
+  .rivet {
+    position: absolute;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #6b5c42, #191510 70%);
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+  }
+  .rivet.tl { top: 0.7rem; left: 0.7rem; }
+  .rivet.tr { top: 0.7rem; right: 0.7rem; }
+  .rivet.bl { bottom: 0.7rem; left: 0.7rem; }
+  .rivet.br { bottom: 0.7rem; right: 0.7rem; }
+
+  .plate-header {
+    text-align: center;
+    padding-bottom: 1.4rem;
+    margin-bottom: 1.6rem;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .brand {
+    font-size: clamp(1.1rem, 2.6vw, 1.5rem);
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    color: var(--bone);
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+  }
+  .submodel {
+    margin-top: 0.4rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.28em;
+    color: var(--bone-dim);
+  }
+  .live-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    margin-top: 0.55rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    color: var(--ok);
+  }
+  .live-dot {
+    width: 0.4em;
+    height: 0.4em;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 6px var(--ok-glow);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  .live-tag.stale { color: var(--bad); }
+  .live-tag.stale .live-dot { background: var(--bad); box-shadow: 0 0 6px var(--bad-glow); animation: none; }
+
+  .tubes-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(1rem, 4vw, 2.5rem);
+  }
+  @media (max-width: 34rem) {
+    .tubes-row { grid-template-columns: 1fr; }
+  }
+
+  .cluster {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 1.1rem 0.75rem 1.3rem;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.05));
+    border-radius: 0.6rem;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  }
+  .cluster-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.24em;
+    color: var(--bone-dim);
+  }
+  .tube-bank { display: flex; align-items: flex-end; gap: 0.5rem; }
+
+  .tube {
+    position: relative;
+    width: clamp(3rem, 8vw, 4.2rem);
+    height: clamp(4.6rem, 12vw, 6.4rem);
+    border-radius: 1.6rem 1.6rem 0.5rem 0.5rem;
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(255, 200, 150, 0.05), transparent 55%),
+      linear-gradient(180deg, #0f0c08 0%, #050403 100%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+      0 0 0 2px var(--ink-deep),
+      0 6px 14px rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .tube::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom, rgba(255, 255, 255, 0.045) 0, rgba(255, 255, 255, 0.045) 1px,
+      transparent 1px, transparent 6px
+    );
+    pointer-events: none;
+  }
+  .tube::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(115deg, transparent 32%, rgba(255, 255, 255, 0.09) 46%, transparent 62%);
+    pointer-events: none;
+  }
+
+  .tube-digit {
+    position: relative;
+    z-index: 1;
+    font-family: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Roboto Mono", monospace;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(2.2rem, 6.5vw, 3.4rem);
+    color: var(--glow);
+    text-shadow: 0 0 4px var(--glow-soft), 0 0 16px var(--glow), 0 0 38px rgba(255, 154, 60, 0.55);
+    animation: flicker 5.5s ease-in-out infinite;
+  }
+  .tube-pct .tube-digit { font-size: clamp(1.5rem, 4.5vw, 2.1rem); }
+
+  .tube-digit.pulse { animation: value-pulse 0.5s ease-out, flicker 5.5s ease-in-out infinite; }
+
+  .tube-cap {
+    width: clamp(3rem, 8vw, 4.2rem);
+    height: 0.55rem;
+    margin-top: -0.15rem;
+    background: linear-gradient(180deg, #55483380, #0d0b08);
+    clip-path: polygon(18% 0, 82% 0, 96% 100%, 4% 100%);
+  }
+
+  .gauge-wrap { width: clamp(8rem, 22vw, 11rem); }
+  .gauge-needle {
+    transform-origin: 50px 50px;
+    transform: rotate(-90deg);
+    transition: transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .gauge-fill { transition: d 0.9s; }
+
+  .reset-plate {
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: var(--bone-dim);
+    text-align: center;
+  }
+  .reset-plate strong {
+    display: block;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    color: var(--bone);
+    margin-bottom: 0.15rem;
+  }
+
+  .lamp-row {
+    display: flex;
+    justify-content: center;
+    gap: clamp(1.5rem, 5vw, 3rem);
+    margin-top: 1.9rem;
+    padding-top: 1.6rem;
+    border-top: 1px solid rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+    flex-wrap: wrap;
+  }
+  .lamp { display: flex; flex-direction: column; align-items: center; gap: 0.55rem; }
+  .dome {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #55503f, #201c14 70%);
+    box-shadow: 0 0 0 2px var(--ink-deep), 0 0 0 3px rgba(255, 255, 255, 0.08), 0 2px 4px rgba(0, 0, 0, 0.5);
+    transition: background 0.4s, box-shadow 0.4s;
+  }
+  .lamp-ok .dome {
+    background: radial-gradient(circle at 35% 30%, var(--ok-glow), var(--ok) 55%, #274022 100%);
+    box-shadow: 0 0 0 2px var(--ink-deep), 0 0 0 3px rgba(255, 255, 255, 0.08), 0 0 12px rgba(143, 184, 122, 0.65);
+  }
+  .lamp-warn .dome {
+    background: radial-gradient(circle at 35% 30%, var(--warn-glow), var(--warn) 55%, #4a380f 100%);
+    box-shadow: 0 0 0 2px var(--ink-deep), 0 0 0 3px rgba(255, 255, 255, 0.08), 0 0 12px rgba(232, 179, 74, 0.6);
+  }
+  .lamp-off .dome {
+    background: radial-gradient(circle at 35% 30%, #6a3a30, #201510 70%);
+    box-shadow: 0 0 0 2px var(--ink-deep), 0 0 0 3px rgba(255, 255, 255, 0.08), 0 0 8px rgba(217, 99, 74, 0.35);
+  }
+  .lamp-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: var(--bone-dim);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .serial-plate {
+    margin-top: 1.6rem;
+    text-align: center;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    color: var(--bone-dim);
+    opacity: 0.85;
+  }
+
+  @keyframes value-pulse {
+    0% { filter: brightness(2.2); }
+    100% { filter: brightness(1); }
+  }
+  @keyframes flicker {
+    0%, 92%, 100% { opacity: 1; }
+    93% { opacity: 0.75; }
+    94% { opacity: 1; }
+    96% { opacity: 0.85; }
+    97% { opacity: 1; }
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tube-digit, .live-dot { animation: none !important; }
+    .gauge-needle { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<main class="console">
+  <div class="rivet tl" aria-hidden="true"></div>
+  <div class="rivet tr" aria-hidden="true"></div>
+  <div class="rivet bl" aria-hidden="true"></div>
+  <div class="rivet br" aria-hidden="true"></div>
+
+  <p class="sr-only" id="sr-summary">Waiting for the first captured response…</p>
+
+  <header class="plate-header">
+    <div class="brand">UNIFIED LOAD TELEMETRY</div>
+    <div class="submodel">RATE WINDOW MONITOR &middot; 5H / 7D</div>
+    <div class="live-tag" id="live-tag"><span class="live-dot"></span><span id="live-tag-text">CONNECTING</span></div>
+  </header>
+
+  <section class="tubes-row" aria-hidden="true">
+    <div class="cluster">
+      <div class="cluster-label">5-HOUR LOAD</div>
+      <div class="tube-bank">
+        <div class="tube"><span class="tube-digit" id="d5-tens">&ndash;</span></div>
+        <div class="tube"><span class="tube-digit" id="d5-ones">&ndash;</span></div>
+        <div class="tube tube-pct"><span class="tube-digit">%</span></div>
+      </div>
+      <div class="tube-cap"></div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 100 58" width="100%" height="auto">
+          <path d="M 8 52 A 42 42 0 0 1 92 52" fill="none" stroke="var(--glow-dim)" stroke-width="5" stroke-linecap="round"/>
+          <path id="arc5" class="gauge-fill" d="M 8 52 A 42 42 0 0 1 8 52" fill="none" stroke="var(--glow)" stroke-width="5" stroke-linecap="round"/>
+          <g stroke="var(--bone-dim)" stroke-width="1">
+            <line x1="8" y1="52" x2="12" y2="52"/>
+            <line x1="14.7" y1="18.7" x2="18.1" y2="21.3"/>
+            <line x1="50" y1="10" x2="50" y2="14"/>
+            <line x1="85.3" y1="18.7" x2="81.9" y2="21.3"/>
+            <line x1="92" y1="52" x2="88" y2="52"/>
+          </g>
+          <g class="gauge-needle" id="needle5">
+            <line x1="50" y1="50" x2="50" y2="16" stroke="var(--glow-soft)" stroke-width="2" stroke-linecap="round"/>
+          </g>
+          <circle cx="50" cy="50" r="3.2" fill="#0d0b08" stroke="var(--gunmetal-hi)" stroke-width="1"/>
+        </svg>
+      </div>
+      <div class="reset-plate"><strong>NEXT RESET</strong><span id="reset5">&ndash;</span></div>
+    </div>
+
+    <div class="cluster">
+      <div class="cluster-label">7-DAY LOAD</div>
+      <div class="tube-bank">
+        <div class="tube"><span class="tube-digit" id="d7-tens">&ndash;</span></div>
+        <div class="tube"><span class="tube-digit" id="d7-ones">&ndash;</span></div>
+        <div class="tube tube-pct"><span class="tube-digit">%</span></div>
+      </div>
+      <div class="tube-cap"></div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 100 58" width="100%" height="auto">
+          <path d="M 8 52 A 42 42 0 0 1 92 52" fill="none" stroke="var(--glow-dim)" stroke-width="5" stroke-linecap="round"/>
+          <path id="arc7" class="gauge-fill" d="M 8 52 A 42 42 0 0 1 8 52" fill="none" stroke="var(--glow)" stroke-width="5" stroke-linecap="round"/>
+          <g stroke="var(--bone-dim)" stroke-width="1">
+            <line x1="8" y1="52" x2="12" y2="52"/>
+            <line x1="14.7" y1="18.7" x2="18.1" y2="21.3"/>
+            <line x1="50" y1="10" x2="50" y2="14"/>
+            <line x1="85.3" y1="18.7" x2="81.9" y2="21.3"/>
+            <line x1="92" y1="52" x2="88" y2="52"/>
+          </g>
+          <g class="gauge-needle" id="needle7">
+            <line x1="50" y1="50" x2="50" y2="16" stroke="var(--glow-soft)" stroke-width="2" stroke-linecap="round"/>
+          </g>
+          <circle cx="50" cy="50" r="3.2" fill="#0d0b08" stroke="var(--gunmetal-hi)" stroke-width="1"/>
+        </svg>
+      </div>
+      <div class="reset-plate"><strong>NEXT RESET</strong><span id="reset7">&ndash;</span></div>
+    </div>
+  </section>
+
+  <section class="lamp-row" aria-hidden="true">
+    <div class="lamp lamp-off" id="lamp5">
+      <span class="dome"></span>
+      <span class="lamp-label">5H STATUS<br><span id="lamp5-text">&ndash;&ndash;</span></span>
+    </div>
+    <div class="lamp lamp-off" id="lamp7">
+      <span class="dome"></span>
+      <span class="lamp-label">7D STATUS<br><span id="lamp7-text">&ndash;&ndash;</span></span>
+    </div>
+    <div class="lamp lamp-off" id="lampOv">
+      <span class="dome"></span>
+      <span class="lamp-label">OVERAGE<br><span id="lampOv-text">&ndash;&ndash;</span></span>
+    </div>
+  </section>
+
+  <footer class="serial-plate">
+    <span id="footer-line">AWAITING FIRST CAPTURE &middot; SEND A MESSAGE IN CLAUDE CODE</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var els = {
+    liveTag: document.getElementById("live-tag"),
+    liveTagText: document.getElementById("live-tag-text"),
+    d5tens: document.getElementById("d5-tens"),
+    d5ones: document.getElementById("d5-ones"),
+    d7tens: document.getElementById("d7-tens"),
+    d7ones: document.getElementById("d7-ones"),
+    needle5: document.getElementById("needle5"),
+    needle7: document.getElementById("needle7"),
+    arc5: document.getElementById("arc5"),
+    arc7: document.getElementById("arc7"),
+    reset5: document.getElementById("reset5"),
+    reset7: document.getElementById("reset7"),
+    lamp5: document.getElementById("lamp5"),
+    lamp5text: document.getElementById("lamp5-text"),
+    lamp7: document.getElementById("lamp7"),
+    lamp7text: document.getElementById("lamp7-text"),
+    lampOv: document.getElementById("lampOv"),
+    lampOvText: document.getElementById("lampOv-text"),
+    footerLine: document.getElementById("footer-line"),
+    srSummary: document.getElementById("sr-summary"),
+  };
+
+  function pad(n) { return String(n).padStart(2, "0"); }
+
+  function fmtReset(unixStr) {
+    if (!unixStr) return "–";
+    var d = new Date(parseInt(unixStr, 10) * 1000);
+    if (isNaN(d.getTime())) return "–";
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function clampPct(v) {
+    var n = Math.round((parseFloat(v) || 0) * 100);
+    if (n < 0) n = 0;
+    if (n > 99) n = 99;
+    return n;
+  }
+
+  function arcPath(pct) {
+    var angleDeg = 180 - 1.8 * pct;
+    var rad = (angleDeg * Math.PI) / 180;
+    var x = 50 + 42 * Math.cos(rad);
+    var y = 52 - 42 * Math.sin(rad);
+    return "M 8 52 A 42 42 0 0 1 " + x.toFixed(1) + " " + y.toFixed(1);
+  }
+
+  function setDigit(el, value) {
+    if (el.textContent !== value) {
+      el.textContent = value;
+      el.classList.remove("pulse");
+      void el.offsetWidth;
+      el.classList.add("pulse");
+    }
+  }
+
+  function setLamp(lampEl, textEl, state, label) {
+    lampEl.classList.remove("lamp-ok", "lamp-warn", "lamp-off");
+    lampEl.classList.add("lamp-" + state);
+    textEl.textContent = label;
+  }
+
+  function render(data) {
+    var u5 = clampPct(data["anthropic-ratelimit-unified-5h-utilization"]);
+    var u7 = clampPct(data["anthropic-ratelimit-unified-7d-utilization"]);
+
+    setDigit(els.d5tens, String(Math.floor(u5 / 10)));
+    setDigit(els.d5ones, String(u5 % 10));
+    setDigit(els.d7tens, String(Math.floor(u7 / 10)));
+    setDigit(els.d7ones, String(u7 % 10));
+
+    els.needle5.style.transform = "rotate(" + (-90 + 1.8 * u5) + "deg)";
+    els.needle7.style.transform = "rotate(" + (-90 + 1.8 * u7) + "deg)";
+    els.arc5.setAttribute("d", arcPath(u5));
+    els.arc7.setAttribute("d", arcPath(u7));
+
+    els.reset5.textContent = fmtReset(data["anthropic-ratelimit-unified-5h-reset"]);
+    els.reset7.textContent = fmtReset(data["anthropic-ratelimit-unified-7d-reset"]);
+
+    var s5 = data["anthropic-ratelimit-unified-5h-status"];
+    var s7 = data["anthropic-ratelimit-unified-7d-status"];
+    setLamp(els.lamp5, els.lamp5text, s5 === "allowed" ? "ok" : (s5 ? "warn" : "off"), (s5 || "––").toUpperCase());
+    setLamp(els.lamp7, els.lamp7text, s7 === "allowed" ? "ok" : (s7 ? "warn" : "off"), (s7 || "––").toUpperCase());
+
+    var ov = data["anthropic-ratelimit-unified-overage-status"];
+    var reason = data["anthropic-ratelimit-unified-overage-disabled-reason"];
+    if (ov === "allowed") {
+      setLamp(els.lampOv, els.lampOvText, "ok", "AVAILABLE");
+    } else if (ov === "rejected") {
+      setLamp(els.lampOv, els.lampOvText, "off", reason === "org_level_disabled" ? "DISABLED · ORG POLICY" : "DISABLED");
+    } else {
+      setLamp(els.lampOv, els.lampOvText, "off", "––");
+    }
+
+    var claim = (data["anthropic-ratelimit-unified-representative-claim"] || "–").toUpperCase();
+    var fallback = data["anthropic-ratelimit-unified-fallback-percentage"];
+    var fallbackPct = fallback ? Math.round(parseFloat(fallback) * 100) + "%" : "–";
+    var captured = data["_captured_at"] || "–";
+    els.footerLine.textContent = "CAPTURED " + captured + " · REPRESENTATIVE CLAIM: " + claim + " · FALLBACK " + fallbackPct;
+
+    els.srSummary.textContent = "5-hour window " + u5 + " percent, allowed status " + s5 +
+      ". 7-day window " + u7 + " percent, allowed status " + s7 +
+      ". Captured " + captured + ".";
+
+    setLive(true);
+  }
+
+  function setLive(ok) {
+    els.liveTag.classList.toggle("stale", !ok);
+    els.liveTagText.textContent = ok ? "LIVE" : "NO SIGNAL";
+  }
+
+  function poll() {
+    fetch("/_probe/usage.json", { cache: "no-store" })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data && Object.keys(data).length) {
+          render(data);
+        } else {
+          setLive(false);
+          els.liveTagText.textContent = "AWAITING DATA";
+          els.footerLine.textContent = "AWAITING FIRST CAPTURE · SEND A MESSAGE IN CLAUDE CODE";
+        }
+      })
+      .catch(function () {
+        setLive(false);
+        els.footerLine.textContent = "CONNECTION LOST · IS hdr_probe.py RUNNING?";
+      });
+  }
+
+  poll();
+  setInterval(poll, 4000);
+})();
+</script>
+</body>
+</html>
